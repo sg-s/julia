@@ -123,12 +123,12 @@ end
 # The mast values are used as res = _or(_and(res, mskBits), oneBits)
 
 mskBits(::Type{T}) where T = 0xffffffffffffffff
-mskBits(::Type{T}, ::Val{N}) where {T,N} =  ntuple(i-> VecElement(mskBits(T)), Val(N))
+mskBits(::Type{T}, ::Val{N}) where {T,N} = ntuple(i->VecElement(mskBits(T)), Val(N))
 
-oneBits(::Type{T}) where T =  0x0000000000000000
-oneBits(::Type{T}, ::Val{N}) where {T,N} =  ntuple(i-> VecElement(oneBits(T)), Val(N))
+oneBits(::Type{T}) where T = 0x0000000000000000
+oneBits(::Type{T}, ::Val{N}) where {T,N} = ntuple(i->VecElement(oneBits(T)), Val(N))
 
-mskBits(::Type{Float64})  = Base.significand_mask(Float64)
+mskBits(::Type{Float64}) = Base.significand_mask(Float64)
 oneBits(::Type{Float64}) = Base.exponent_one(Float64)
 
 mskBits(::Type{Float32}) = Base.significand_mask(Float32) + UInt64(Base.significand_mask(Float32))<<32
@@ -148,14 +148,14 @@ function forkRand(rng::Union{TaskLocalRNG, Xoshiro}, ::Val{N}) where N
     (s0, s1, s2, s3)
 end
 
-@inline function xoshiro_bulk(rng::Union{TaskLocalRNG, Xoshiro}, dst::Ptr{UInt8}, len::Int, ::Type{T}, ::Val{N}) where {T<:Union{UInt8, Float32, Float64, Bool}, N}
+@inline function xoshiro_bulk(rng::Union{TaskLocalRNG, Xoshiro}, dst::Ptr{UInt8}, len::Int, T::Union{Type{UInt8}, Type{Bool}, Type{Float32}, Type{Float64}}, ::Val{N}) where N
     if len >= simdThreshold(T)
         written = xoshiro_bulk_simd(rng, dst, len, T, Val(N))
         len -= written
         dst += written
     end
     if len != 0
-        xoshiro_bulk_nosimd(rng, dst, len,  T)
+        xoshiro_bulk_nosimd(rng, dst, len, T)
     end
     nothing
 end
@@ -198,7 +198,7 @@ end
         s3 = _rotl45(s3)
         ref = Ref(res)
         # TODO: This may make the random-stream dependent on system endianness
-        GC.@preserve ref ccall(:memcpy, Nothing, (Ptr{UInt8}, Ptr{Cvoid}, Csize_t), dst+i, pointer_from_objref(ref) , len-i)
+        ccall(:memcpy, Ptr{Cvoid}, (Ptr{UInt8}, Ptr{UInt64}, Csize_t), dst+i, ref, len-i)
     end
     if rng isa TaskLocalRNG
         task.rngState0, task.rngState1, task.rngState2, task.rngState3 = s0, s1, s2, s3
@@ -223,7 +223,7 @@ end
         shift = 0
         while i+8 <= len && shift < 8
             resLoc = _and(_lshr(res, shift), 0x0101010101010101)
-            unsafe_store!(reinterpret(Ptr{UInt64}, dst + i), res)
+            unsafe_store!(reinterpret(Ptr{UInt64}, dst + i), resLoc)
             i += 8
             shift += 1
         end
@@ -239,15 +239,9 @@ end
     if i < len
         # we may overgenerate some bytes here, if len mod 64 <= 56 and len mod 8 != 0
         res = _rotl23(_plus(s0,s3))
-        while i+8 <= len
-            resLoc = _and(res, 0x0101010101010101)
-            res = _lshr(res, 1)
-            unsafe_store!(reinterpret(Ptr{UInt64}, dst + i), resLoc)
-            i += 8
-        end
         resLoc = _and(res, 0x0101010101010101)
         ref = Ref(resLoc)
-        GC.@preserve ref ccall(:memcpy, Nothing, (Ptr{UInt8}, Ptr{Cvoid}, Csize_t), dst+i, pointer_from_objref(ref) , len-i)
+        ccall(:memcpy, Ptr{Cvoid}, (Ptr{UInt8}, Ptr{UInt64}, Csize_t), dst+i, ref, len-i)
         t = _shl17(s1)
         s2 = _xor(s2, s0)
         s3 = _xor(s3, s1)
@@ -259,7 +253,7 @@ end
     if rng isa TaskLocalRNG
         task.rngState0, task.rngState1, task.rngState2, task.rngState3 = s0, s1, s2, s3
     else
-        rng.s0, rng.s1, rng.s2, rng.s3 =  s0, s1, s2, s3
+        rng.s0, rng.s1, rng.s2, rng.s3 = s0, s1, s2, s3
     end
     nothing
 end
@@ -284,7 +278,7 @@ end
         s2 = _xor(s2, t)
         s3 = _rotl45(s3)
         unsafe_store!(reinterpret(Ptr{NTuple{N,VecElement{UInt64}}}, dst + i), res)
-        i +=  8*N
+        i += 8*N
     end
     return i
 end
@@ -307,7 +301,7 @@ end
             toWrite = _and(tmp, msk)
             unsafe_store!(reinterpret(Ptr{NTuple{N,VecElement{UInt64}}}, dst + i + k*N*8), toWrite)
         end
-        i +=  64*N
+        i += 64*N
     end
     return i
 end
